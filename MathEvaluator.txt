@@ -1,0 +1,1 @@
+./Debug/Main.cpp.o ./Debug/Evaluator.cpp.o ./Debug/Token.cpp.o ./Debug/TokenBuilder.cpp.o
