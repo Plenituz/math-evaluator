@@ -2,80 +2,101 @@
 #include "Token.h"
 #include "TokenBuilder.h"
 #include <vector>
+#include "CompileException.h"
+#include <iostream>
+#include <fstream>
 
 using namespace std;
 
+Evaluator::Evaluator(const std::string& str, bool isFile)
+{
+    if(!isFile)
+    {
+        expression = str;
+    }
+    else
+    {
+        ifstream file(str);
+        string content;
+        stringstream s;
+        
+        while(file >> content) 
+        {
+            s << content << ' ';
+        }
+        expression = s.str();
+    }
+}
+
 EvaluationResult* Evaluator::Compile()
 {
-    TokenBuilder builder;
+    TokenBuilder builder(&variables);
     unsigned int index = 0;
     try
     {
         tokens = builder.Parse(expression, index);
     }
-    catch(string e)
+    catch(CompileException e)
     {
-        return new EvaluationResult(e);
+        return new EvaluationResult(e.what());
     }
     
 	return new EvaluationResult();
 }
 
-double Evaluator::Evaluate()
+double Evaluator::GetVariable(std::string name)
 {
-    if(tokens.size() == 1)
-    {
-        NumberToken* result = dynamic_cast<NumberToken*>(tokens[0]);
-        if(result == nullptr)
-            throw "last token is not a number";
-        return result->GetValue();
-    }
-    
-    unsigned int next = FindNextOperator();
-    if(next == 0 || next == tokens.size() - 1)
-        throw "operator at the edge, an operator must be surrounded by values";
-    
-    NumberToken* valueBefore = dynamic_cast<NumberToken*>(tokens[next-1]);
-    NumberToken* valueAfter = dynamic_cast<NumberToken*>(tokens[next+1]);
-    OperatorToken* op = dynamic_cast<OperatorToken*>(tokens[next]);
-    
-    if(valueBefore == nullptr)
-        throw "no value before operator at " + to_string(next);
-    if(valueAfter == nullptr)
-        throw "no value after operator at " + to_string(next);
-    
-    NumberToken* token = new NumberToken(op->Apply(valueBefore->GetValue(), valueAfter->GetValue()));
-    tokens.erase(tokens.begin() + next - 1, tokens.begin() + next + 1);
-    tokens[next - 1] = token;
-    
-    delete valueBefore;
-    delete valueAfter;
-    delete op;
-    
-    return Evaluate();
+    return variables[name];
 }
 
-unsigned int Evaluator::FindNextOperator()
+void Evaluator::EvaluateSourceUnsafe()
 {
-    //go thought the tokens, find the first occurence of the highest priority
-    unsigned int highestPriority = 0;
-    int firstIndexOfHighest = -1;
-    OperatorToken* op = nullptr;
-    
     for(uint i = 0; i < tokens.size(); i++)
     {
-        op = dynamic_cast<OperatorToken*>(tokens[i]);
+        cout << "looking at " << tokens[i]->Print() << endl;
         
-        if(op != nullptr && op->Priority() > highestPriority)
+        NameToken* nameToken = dynamic_cast<NameToken*>(tokens[i]);
+        if(nameToken != nullptr && i != tokens.size()-1)
         {
-            highestPriority = op->Priority();
-            firstIndexOfHighest = i;   
+            //assign variable
+            int nextEnd = FindEnd(i);
+            if(nextEnd == -1)
+                throw RuntimeException("no end of line after assignement expression " + nameToken->Print());
+            //remember: token i is still the name token, so i + 1 is assign token, 
+            //we evaluate after the assign token
+            //and we don't take the end token in the evaluation so we stop at nextEnd - 1
+            ExpressionEvaluator exprEv(tokens.begin() + i + 2, tokens.begin() + nextEnd);
+            cout << "assigning this :" << endl;
+            cout << exprEv.Print() << endl;
+            double evaluated = exprEv.EvaluateUnsafe()->GetValue();
+            nameToken->SetValue(evaluated);
+            
+            i += nextEnd - i;
         }
     }
-    
-    if(firstIndexOfHighest == -1)
+}
+
+int Evaluator::FindEnd(unsigned int from)
+{
+    //return the index of the next EndToken
+    for(uint i = from; i < tokens.size(); i++)
     {
-        throw "no operator found";
+        EndToken* end = dynamic_cast<EndToken*>(tokens[i]);
+        if(end != nullptr)
+            return i;
     }
-    return firstIndexOfHighest;
+    return -1;
+}
+
+EvaluationResult* Evaluator::EvaluateSource()
+{
+    try
+    {
+        EvaluateSourceUnsafe();
+        return new EvaluationResult();
+    }
+    catch(RuntimeException e)
+    {
+        return new EvaluationResult(e.what());
+    }
 }
